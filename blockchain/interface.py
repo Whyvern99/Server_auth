@@ -5,12 +5,14 @@ from unittest import result
 from urllib import response
 from pkg_resources import require
 from flask import Flask, request
+from flask_cors import CORS
 import requests
 import blockchain as bc
 import time
 import json
 
 app = Flask(__name__)
+CORS(app)
 blockchain = bc.Blockchain()
 
 peers = set()
@@ -68,7 +70,7 @@ def announce_new_block(block):
 @app.route('/new_transaction', methods=['POST'])
 def new_transaction():
     data=request.get_json()
-    require_fields = ["author", "content"]
+    require_fields = ["data", "pk", "UUID"]
     for field in require_fields:
         if not data.get(field):
             return "Invalid transaction data", 404
@@ -120,3 +122,6 @@ def concensus():
         return True
 
     return False
+
+
+app.run(debug=True, port=8000)
