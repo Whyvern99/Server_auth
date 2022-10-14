@@ -79,6 +79,22 @@ def new_transaction():
     blockchain.add_new_transaction(data)
     return "Success", 201
 
+@app.route('/block_exists', methods=['POST'])
+def block_exists():
+    data=request.get_json()
+    require_fields = ["data", "pk", "UUID"]
+    for field in require_fields:
+        if not data.get(field):
+            return "Invalid transaction data", 404
+    val=blockchain.block_exists(data, blockchain.chain)
+    print(val)
+    if(val=="Error"): 
+        return "Incorrect", 401
+    elif (val): 
+        return "Success", 200 
+    else: 
+        return "Created", 201
+
 @app.route('/chain', methods=['GET'])
 def get_chain():
     chain = []

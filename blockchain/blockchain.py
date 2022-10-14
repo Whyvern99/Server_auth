@@ -82,3 +82,15 @@ class Blockchain:
             block.hash, previous_block = hash, hash
         return result
 
+    def block_exists(cls, data, chain):
+        for block in chain:
+            transaction=block.transactions
+            if transaction and data["UUID"]==transaction[0]['UUID']:
+                    if data['pk']==transaction[0]['pk'] and data['data']==transaction[0]['data']:
+                        return True
+                    else:
+                        return 'Error'
+                    break
+        cls.add_new_transaction(data)
+        cls.mine()
+        return False
