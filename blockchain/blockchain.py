@@ -94,3 +94,10 @@ class Blockchain:
         cls.add_new_transaction(data)
         cls.mine()
         return False
+    
+    def get_pk(cls, UUID, chain):
+        for block in chain:
+            transaction=block.transactions
+            if transaction and UUID==transaction[0]['UUID']:
+                return transaction[0]['pk']
+        return False

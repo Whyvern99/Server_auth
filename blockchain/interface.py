@@ -1,10 +1,11 @@
 from asyncio import protocols
 from glob import glob
+import mimetypes
 from sqlite3 import enable_shared_cache
 from unittest import result
 from urllib import response
 from pkg_resources import require
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import blockchain as bc
@@ -94,6 +95,16 @@ def block_exists():
         return "Success", 200 
     else: 
         return "Created", 201
+
+@app.route('/get_pk', methods=['GET'])
+def get_pk():
+    UUID=request.args.get('UUID')
+    val=blockchain.get_pk(UUID, blockchain.chain)
+    if(val):
+        return jsonify(val)
+    else:
+        return "Incorrect", 401
+
 
 @app.route('/chain', methods=['GET'])
 def get_chain():
