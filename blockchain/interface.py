@@ -61,21 +61,6 @@ blockchain = bc.Blockchain()
 
 peers = set()
 
-def encode_auth_token(self, device_UUID):
-    try:
-        payload ={
-            'exp' : datetime.datetime.utcnow() + datetime.timedelta(days=0, seconds=5),
-            'iat' : datetime.datetime.utcnow(),
-            'sub' : device_UUID
-        }
-        return jwt.encode(
-            payload,
-            app.config.get('SECRET_KEY'),
-            algorithm='HS256'
-        )
-    except Exception as e:
-        return e
-
 @app.route('/register_node', methods=['POST'])
 def register_new_node():
     node_addr = request.get_json()["node_address"]
@@ -159,8 +144,6 @@ def get_pk():
     print("/get_pk")
     UUID=request.args.get('UUID')
     val=blockchain.get_pk(UUID, blockchain.chain)
-    j=encode_auth_token(UUID)
-    print(j)
     if(val):
         return jsonify(val)
     else:
@@ -382,7 +365,6 @@ def register():
     dataFrame = pd.read_csv(NEW_USER)
     dataFrame.to_csv(TRAIN_CSV_FILE, mode='a', index=False, header=False)
     trainData = preProcessData(TRAIN_CSV_FILE)
-    #testData = preProcessData(TEST_CSV_FILE)
     # Splitting the dataset into training, validation and testing dataset
     X = np.array(trainData.iloc[:, :-1], dtype = float)
     y = trainData.iloc[:, -1]
