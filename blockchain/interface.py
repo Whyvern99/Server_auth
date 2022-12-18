@@ -11,6 +11,7 @@ import requests
 import blockchain as bc
 import time
 import json
+import shutil
 #requisits and ignore warnings
 import warnings
 warnings.simplefilter('ignore')
@@ -33,11 +34,13 @@ import collections
 import keras
 import librosa
 import csv
+import datetime
 import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+import jwt
+import sqlite3
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from keras import models, layers
@@ -57,6 +60,21 @@ CORS(app)
 blockchain = bc.Blockchain()
 
 peers = set()
+
+def encode_auth_token(self, device_UUID):
+    try:
+        payload ={
+            'exp' : datetime.datetime.utcnow() + datetime.timedelta(days=0, seconds=5),
+            'iat' : datetime.datetime.utcnow(),
+            'sub' : device_UUID
+        }
+        return jwt.encode(
+            payload,
+            app.config.get('SECRET_KEY'),
+            algorithm='HS256'
+        )
+    except Exception as e:
+        return e
 
 @app.route('/register_node', methods=['POST'])
 def register_new_node():
@@ -138,8 +156,11 @@ def block_exists():
 
 @app.route('/get_pk', methods=['GET'])
 def get_pk():
+    print("/get_pk")
     UUID=request.args.get('UUID')
     val=blockchain.get_pk(UUID, blockchain.chain)
+    j=encode_auth_token(UUID)
+    print(j)
     if(val):
         return jsonify(val)
     else:
@@ -189,6 +210,9 @@ def concensus():
         return True
 
     return False
+
+con = sqlite3.connect('tfm.db', check_same_thread=False)
+cur = con.cursor()
 
 
 #Voice recognition
@@ -261,12 +285,15 @@ def extractWavFeatures(filename, dirname, csvFileName):
     file.close()
 
 def predict_audio(filename, dirname):
+    new_model = keras.models.load_model('../speaker-recognition.h5')
+    scaler = joblib.load('../scaler.save') 
     extractWavFeatures(filename, dirname, final_test)
     final_testData = preProcessData(final_test)
     X_test = np.array(final_testData.iloc[:, :-1], dtype = float)
     y_test = final_testData.iloc[:, -1]
     X_test = scaler.transform( X_test )
     y_test=np.array(y_test, dtype=int)
+    print(set(y_test))
     score = new_model.evaluate(X_test, y_test)
     # Prediction
     return printPrediction(X_test, y_test, False, new_model)
@@ -278,10 +305,19 @@ scaler = joblib.load('../scaler.save')
 
 @app.route('/voice_recognition', methods=['POST'])
 def recognition():
-    f = open('../new_audios/test_file/Speaker0005_009.wav', 'wb')
-    f.write(request.data)
+    mail=request.get_json()['email']
+    data=request.get_json()['data']
+    print(mail)
+    s=cur.execute("SELECT user_id from users where email='"+mail+"'")
+    id=s.fetchone()[0]
+    filename="Speaker"+str(id).zfill(4)+"_000.wav"
+    print(filename)
+    new_model = keras.models.load_model('../speaker-recognition.h5')
+    scaler = joblib.load('../scaler.save') 
+    f = open('../new_audios/test_file/'+filename, 'wb')
+    f.write(bytearray(data['data']))
     f.close()
-    return {"Res": predict_audio("Speaker0005_009.wav", "../new_audios/test_file/")}
+    return jsonify({"Res": predict_audio(filename, "../new_audios/test_file/")})
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -328,10 +364,23 @@ TRAIN_CSV_FILE = "../train.csv"
 
 @app.route('/voice_register', methods=['POST'])
 def register():
-    NEW_USER = "new_user.csv"
+    mail=request.get_json()['email']
+    data=request.get_json()['data']
+    #print(data['0']['data'])
+    shutil.rmtree('../new_audios/train2/')
+    os.mkdir('../new_audios/train2/')
+    cur.execute("INSERT INTO users (email) VALUES ('"+mail+"')")
+    con.commit()
+    s=cur.execute("SELECT user_id from users where email='"+mail+"'")
+    id=s.fetchone()[0]
+    for x in data:
+        f=open('../new_audios/train2/Speaker'+str(id).zfill(4)+"_"+str(x).zfill(3)+".wav", "wb")
+        f.write(bytearray(data[str(x)]['data']))
+
+    NEW_USER = "../new_user.csv"
     extractWavFeaturesmult("../new_audios/train2", NEW_USER)
     dataFrame = pd.read_csv(NEW_USER)
-    #dataFrame.to_csv(TRAIN_CSV_FILE, mode='a', index=False, header=False)
+    dataFrame.to_csv(TRAIN_CSV_FILE, mode='a', index=False, header=False)
     trainData = preProcessData(TRAIN_CSV_FILE)
     #testData = preProcessData(TEST_CSV_FILE)
     # Splitting the dataset into training, validation and testing dataset
@@ -356,8 +405,8 @@ def register():
     y_train=np.array(y_train, dtype=int)
     y_val=np.array(y_val, dtype=int)
     history = model.fit(X_train,y_train,validation_data=(X_val, y_val),epochs=100,batch_size=1, callbacks=[es])
-    joblib.dump(scaler, 'scaler.save') 
-    model.save('speaker-recognition.h5')
+    joblib.dump(scaler, '../scaler.save') 
+    model.save('../speaker-recognition.h5')
     return {"Res":"OK"}
 
 

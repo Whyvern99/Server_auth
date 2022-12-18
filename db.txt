@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE);
+
+INSERT INTO users (email) VALUES ('test0@mail.com');
+INSERT INTO users (email) VALUES ('test1@mail.com');
+INSERT INTO users (email) VALUES ('test2@mail.com');
+INSERT INTO users (email) VALUES ('test3@mail.com');
+INSERT INTO users (email) VALUES ('test4@mail.com');
+INSERT INTO users (email) VALUES ('test5@mail.com');
