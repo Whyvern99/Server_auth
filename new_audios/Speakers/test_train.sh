@@ -3,6 +3,8 @@
 
 rm -R ../test
 rm -R ../train
+#mkdir ../train
+#chmod 777 ../train
 
 if [ ! -d ../test ]; then
 	mkdir ../test

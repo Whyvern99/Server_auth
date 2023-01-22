@@ -1,21 +1,10 @@
-from asyncio import protocols
-from glob import glob
-import mimetypes
-from sqlite3 import enable_shared_cache
-from unittest import result
-from urllib import response
-from pkg_resources import require
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import requests
-import blockchain as bc
-import time
-import json
-import shutil
-#requisits and ignore warnings
 import warnings
 warnings.simplefilter('ignore')
+from keras import models
+from keras import layers
 import keras
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 import numpy as np
 from tqdm import tqdm
 import os
@@ -24,12 +13,7 @@ import pandas as pd
 import csv
 from sklearn import preprocessing
 import joblib
-import wave
-import fnmatch
-import collections
 import matplotlib.pyplot as plt
-import jwt
-import sqlite3
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from keras import models, layers
@@ -39,161 +23,11 @@ from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
 from keras.layers.convolutional import Convolution2D, MaxPooling2D
 from keras.preprocessing.image import ImageDataGenerator
-from matplotlib import pyplot, cm
+from sklearn import preprocessing
 from sklearn.metrics import classification_report, confusion_matrix
-import os
-import fnmatch
-import collections
-
-app = Flask(__name__)
-CORS(app)
-blockchain = bc.Blockchain()
-
-peers = set()
-
-##################################################
-# Blockchain
-##################################################
-
-@app.route('/register_node', methods=['POST'])
-def register_new_node():
-    node_addr = request.get_json()["node_address"]
-    if not node_addr:
-        return "Invalid data", 400
-    peers.add(node_addr)
-    return(get_chain)
-
-@app.route('/register_node_with', methods=['POST'])
-def register_with():
-    node_addr = request.get_json()["node_address"]
-    if not node_addr:
-        return "Invalid data", 400
-    data = {"node_address": request.host_url}
-    headers = {"Content-Type": "application/json"}
-
-    response = requests.post(node_addr + "/register_node", data=json.dumps(data), headers=headers)
-    if response != 200:
-        return response.content, response.status_code
-    else:
-        return response.content, response.status_code
-
-def create_chain_from_dup(chain_dump):
-    blockchain=blockchain()
-    for id, data in enumerate(chain_dump):
-        block=bc.block.Block(data["index"], data["transactions"], data["timestamp"], data["previous_block"])
-        proof = data['hash']
-        if id>0:
-            added = blockchain.add_block(block, proof)
-            if not added:
-                raise Exception("The chain dump is tampered!")
-        else:
-            blockchain.chain.append(block)
-    return blockchain
-
-@app.route('/add_block', methods=['POST'])
-def verify_and_add_block():
-    data=request.get_json()
-    block = bc.block.Block(data["index"], data["transactions"], data["timestamp"], data["previous_block"])
-    proof = data['hash']
-    added = blockchain.add_block(block, proof)
-    if not added:
-        return "The block was discarded by the node", 400
-    return "Block added to the chain", 201
-
-def announce_new_block(block):
-    for peer in peers:
-        url = "{}add_block".format(peer)
-        requests.post(url, data=json.dumps(block.__dict__, sort_keys=True))   
-
-@app.route('/new_transaction', methods=['POST'])
-def new_transaction():
-    data=request.get_json()
-    require_fields = ["data", "pk", "UUID"]
-    for field in require_fields:
-        if not data.get(field):
-            return "Invalid transaction data", 404
-    
-    data["timestamp"]=time.time()
-    blockchain.add_new_transaction(data)
-    return "Success", 201
-
-@app.route('/block_exists', methods=['POST'])
-def block_exists():
-    data=request.get_json()
-    require_fields = ["data", "pk", "UUID"]
-    for field in require_fields:
-        if not data.get(field):
-            return "Invalid transaction data", 404
-    val=blockchain.block_exists(data, blockchain.chain)
-    print(val)
-    if(val=="Error"): 
-        return "Incorrect", 401
-    elif (val): 
-        return "Success", 200 
-    else: 
-        return "Created", 201
-
-@app.route('/get_pk', methods=['GET'])
-def get_pk():
-    print("/get_pk")
-    UUID=request.args.get('UUID')
-    val=blockchain.get_pk(UUID, blockchain.chain)
-    if(val):
-        return jsonify(val)
-    else:
-        return "Incorrect", 401
-
-
-@app.route('/chain', methods=['GET'])
-def get_chain():
-    chain = []
-    for block in blockchain.chain:
-        chain.append(block.__dict__)
-    return json.dumps({"length": len(chain), "chain":chain, "peers":list(peers)})
-
-@app.route('/mine', methods=['GET'])
-def mine():
-    result=blockchain.mine()
-    if not result:
-        return "No blockchain to mine"
-    else:
-        chain_length = len(blockchain.chain)
-        print(chain_length)
-        concensus()
-        if chain_length == len(blockchain.chain):
-            announce_new_block(blockchain.last_block)
-        return "Block #{} is mined".format(blockchain.last_block.index)
-
-
-@app.route('/pending_transactions', methods=['GET'])
-def get_pending_transactions():
-    return json.dumps(blockchain.unconfirmed_transactions)
-
-def concensus():
-    #jerarquitzar
-    global blockchain
-    longest_chain = None
-    current_len = len(blockchain.chain)
-    for node in peers:
-        response = requests.get('{}/chain'.format(node))
-        lenght = response.json()['lenght']
-        chain = response.json()['chain']
-        if lenght > current_len and blockchain.check_chain_validity(chain):
-            current_len = lenght
-            longest_chain = chain
-    
-    if longest_chain:
-        blockchain=longest_chain
-        return True
-
-    return False
-
-con = sqlite3.connect('tfm.db', check_same_thread=False)
-cur = con.cursor()
-
-############################################################
+from matplotlib import cm
+import librosa
 #Voice recognition
-############################################################
 
 def preProcessData(csvFileName):
     print(csvFileName)
@@ -270,7 +104,7 @@ def predict_audio(filename, dirname):
     X_test = np.array(final_testData.iloc[:, :-1], dtype = float)
     y_test = final_testData.iloc[:, -1]
     X_test = scaler.transform( X_test )
-    #y_test=np.array(y_test, dtype=int)
+    y_test=np.array(y_test, dtype=int)
     print(set(y_test))
     score = new_model.evaluate(X_test, y_test)
     # Prediction
@@ -286,10 +120,8 @@ def recognition():
     mail=request.get_json()['email']
     data=request.get_json()['data']
     print(mail)
-    #s=cur.execute("SELECT user_id from users where email='"+mail+"'")
-    #id=s.fetchone()[0]
-    id=61
-    print(id)
+    s=cur.execute("SELECT user_id from users where email='"+mail+"'")
+    id=s.fetchone()[0]
     filename="Speaker"+str(id).zfill(4)+"_000.wav"
     print(filename)
     new_model = keras.models.load_model('../speaker-recognition.h5')
@@ -330,32 +162,28 @@ def extractWavFeaturesmult(soundFilesFolder, csvFileName):
     file.close()
     print("End of extractWavFeatures")
     
-TRAIN_CSV_FILE = "../train.csv"    
-count={0: 73, 1: 93, 2: 95, 3: 67, 4: 71, 5: 56, 6: 59, 7: 48, 8: 78, 9: 51, 10: 42, 11: 51, 12: 26, 13: 28, 14: 39, 15: 29, 16: 37, 17: 34, 18: 31, 19: 25, 20: 399, 21: 45, 22: 399, 23: 30, 24: 42, 25: 38, 26: 35, 27: 36, 28: 46, 29: 23, 30: 25, 31: 36, 32: 28, 33: 27, 34: 26, 35: 24, 36: 25, 37: 43, 38: 26, 39: 39, 40: 24, 41: 24, 42: 31, 43: 26, 44: 28, 45: 32, 46: 29, 47: 26, 48: 23, 49: 39, 50: 25, 51: 23, 52: 23, 53: 23, 54: 399, 55: 7, 56: 7, 57: 7, 58: 7, 59: 7, 60: 7}
+TRAIN_CSV_FILE = "../train.csv"
 
 @app.route('/voice_register', methods=['POST'])
 def register():
     mail=request.get_json()['email']
     data=request.get_json()['data']
-    print(mail)
+    #print(data['0']['data'])
     shutil.rmtree('../new_audios/train2/')
     os.mkdir('../new_audios/train2/')
     cur.execute("INSERT INTO users (email) VALUES ('"+mail+"')")
     con.commit()
     s=cur.execute("SELECT user_id from users where email='"+mail+"'")
     id=s.fetchone()[0]
-    print(id)
     for x in data:
         f=open('../new_audios/train2/Speaker'+str(id).zfill(4)+"_"+str(x).zfill(3)+".wav", "wb")
         f.write(bytearray(data[str(x)]['data']))
 
     NEW_USER = "../new_user.csv"
     extractWavFeaturesmult("../new_audios/train2", NEW_USER)
-    train_data = preProcessData(TRAIN_CSV_FILE)
-    newData = preProcessData(NEW_USER)
     dataFrame = pd.read_csv(NEW_USER)
-    #dataFrame.to_csv(TRAIN_CSV_FILE, mode='a', index=False, header=False)
-    trainData=train_data.append(newData, ignore_index=True)
+    dataFrame.to_csv(TRAIN_CSV_FILE, mode='a', index=False, header=False)
+    trainData = preProcessData(TRAIN_CSV_FILE)
     # Splitting the dataset into training, validation and testing dataset
     X = np.array(trainData.iloc[:, :-1], dtype = float)
     y = trainData.iloc[:, -1]
@@ -363,17 +191,6 @@ def register():
     scaler = StandardScaler()
     X_train = scaler.fit_transform( X_train )
     X_val = scaler.transform( X_val )
-    # weight={}
-    # path='audios/audios/56_speakers_audio_data'
-    # max_value=sum(count.values())
-    # print(len(count))
-    # count.update({len(count):8})
-    # max_value=sum(count.values())
-    # print("Sum of values: "+str(max_value))
-    # weight = {key: value for key, value in sorted(weight.items())}
-    # weight = {k: 1-(v/max_value) for k, v in weight.items()}
-    # print(weight.keys())
-    # print(set(range(57)) - set(y_train))
     model = models.Sequential()
     model.add(layers.Dense(256, activation='relu', input_shape=(X_train.shape[1],)))
     model.add(layers.Dropout(0.5))
@@ -387,13 +204,8 @@ def register():
                 metrics=['accuracy'])
     es = EarlyStopping(monitor='val_loss', patience=3, verbose=1)
     y_train=np.array(y_train, dtype=int)
-    print("hola2")
     y_val=np.array(y_val, dtype=int)
-    history = model.fit(X_train,y_train,validation_data=(X_val, y_val),epochs=100,batch_size=128, callbacks=[es])    
-    print("hola4")
-    joblib.dump(scaler, '../scaler.save')
+    history = model.fit(X_train,y_train,validation_data=(X_val, y_val),epochs=100,batch_size=1, callbacks=[es])
+    joblib.dump(scaler, '../scaler.save') 
     model.save('../speaker-recognition.h5')
     return {"Res":"OK"}
-
-
-app.run(debug=True, port=8000)
