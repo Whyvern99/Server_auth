@@ -44,10 +44,18 @@ from sklearn.metrics import classification_report, confusion_matrix
 import os
 import fnmatch
 import collections
+import base64
+import cv2
+import face_recognition
+import os
+import pickle
+import hashlib
+import block
 
 app = Flask(__name__)
 CORS(app)
 blockchain = bc.Blockchain()
+blockchain.create_genesis_block()
 
 peers = set()
 
@@ -61,7 +69,7 @@ def register_new_node():
     if not node_addr:
         return "Invalid data", 400
     peers.add(node_addr)
-    return(get_chain)
+    return get_chain()
 
 @app.route('/register_node_with', methods=['POST'])
 def register_with():
@@ -72,29 +80,37 @@ def register_with():
     headers = {"Content-Type": "application/json"}
 
     response = requests.post(node_addr + "/register_node", data=json.dumps(data), headers=headers)
-    if response != 200:
+    print(response)
+    if response.status_code != 200:
         return response.content, response.status_code
     else:
-        return response.content, response.status_code
+        global blockchain
+        global peers
+        chain_dump=response.json()['chain']
+        peers.update(response.json()['peers'])
+        blockchain=create_chain_from_dump(chain_dump)
+        return "Registration succesful", 200
 
-def create_chain_from_dup(chain_dump):
-    blockchain=blockchain()
+
+def create_chain_from_dump(chain_dump):
+    new_blockchain=bc.Blockchain()
     for id, data in enumerate(chain_dump):
-        block=bc.block.Block(data["index"], data["transactions"], data["timestamp"], data["previous_block"])
+        block=bc.block.Block(data["index"], data["transactions"], data["timestamp"], data["previous_block"], data["nonce"])
         proof = data['hash']
         if id>0:
-            added = blockchain.add_block(block, proof)
+            added = new_blockchain.add_block(block, proof)
             if not added:
                 raise Exception("The chain dump is tampered!")
         else:
-            blockchain.chain.append(block)
-    return blockchain
+            new_blockchain.chain.append(block)
+    return new_blockchain
 
 @app.route('/add_block', methods=['POST'])
 def verify_and_add_block():
-    data=request.get_json()
-    block = bc.block.Block(data["index"], data["transactions"], data["timestamp"], data["previous_block"])
+    data=json.loads(request.get_json())
+    block = bc.block.Block(data["index"], data["transactions"], data["timestamp"], data["previous_block"], data['nonce'])
     proof = data['hash']
+    print(data)
     added = blockchain.add_block(block, proof)
     if not added:
         return "The block was discarded by the node", 400
@@ -102,8 +118,10 @@ def verify_and_add_block():
 
 def announce_new_block(block):
     for peer in peers:
+        print(block.__dict__)
         url = "{}add_block".format(peer)
-        requests.post(url, data=json.dumps(block.__dict__, sort_keys=True))   
+        print(url)
+        requests.post(url, json=json.dumps(block.__dict__, sort_keys=True))   
 
 @app.route('/new_transaction', methods=['POST'])
 def new_transaction():
@@ -131,6 +149,7 @@ def block_exists():
     elif (val): 
         return "Success", 200 
     else: 
+        mine()
         return "Created", 201
 
 @app.route('/get_pk', methods=['GET'])
@@ -158,7 +177,6 @@ def mine():
         return "No blockchain to mine"
     else:
         chain_length = len(blockchain.chain)
-        print(chain_length)
         concensus()
         if chain_length == len(blockchain.chain):
             announce_new_block(blockchain.last_block)
@@ -176,12 +194,11 @@ def concensus():
     current_len = len(blockchain.chain)
     for node in peers:
         response = requests.get('{}/chain'.format(node))
-        lenght = response.json()['lenght']
+        length = response.json()['length']
         chain = response.json()['chain']
-        if lenght > current_len and blockchain.check_chain_validity(chain):
-            current_len = lenght
+        if length > current_len and blockchain.check_chain_validity(chain):
+            current_len = length
             longest_chain = chain
-    
     if longest_chain:
         blockchain=longest_chain
         return True
@@ -192,26 +209,56 @@ con = sqlite3.connect('tfm.db', check_same_thread=False)
 cur = con.cursor()
 
 ############################################################
+#Emergency
+############################################################
+
+@app.route('/emergencies', methods=['POST'])
+def emergencies():
+    data=request.get_json()
+    require_fields = ["device", "user"]
+    for field in require_fields:
+        if not data.get(field):
+            return "Invalid transaction data", 404
+    s=cur.execute("SELECT rol from users where email='"+data.get("user")+"'")
+    user_p=s.fetchone()[0]
+    s=cur.execute("SELECT permission from devices where device_id='"+str(data.get("device"))+"'")
+    device_p=s.fetchone()[0]
+    if(user_p=="admin"):
+        permission=device_p
+    elif(device_p=="admin"):
+        permission=user_p
+    else:
+        if(user_p==device_p):
+             permission=user_p
+        else:
+            permission=""
+    locations=cur.execute("SELECT * from emergency where permission='"+permission+"'")
+    print(locations)
+    return jsonify(list(locations))
+
+############################################################
 #Voice recognition
 ############################################################
 
 def preProcessData(csvFileName):
-    print(csvFileName)
-    data = pd.read_csv(csvFileName)
-    print(data.head())
-    filenameArray = data['filename'] 
+    print(csvFileName+ " will be preprocessed")
+    info = pd.read_csv(csvFileName)
+    filenameArray = info['filename'] 
     speakerArray = []
     #print(filenameArray)
     for i in range(len(filenameArray)):
         speaker = int(filenameArray[i].split("_")[0].split("r")[1])
         speakerArray.append(speaker)
-    data['number'] = speakerArray
+    info['number'] = speakerArray
     #Dropping unnecessary columns
-    data = data.drop(['filename'],axis=1)
-    data = data.drop(['label'],axis=1)
-    data = data.drop(['chroma_stft'],axis=1)
-    data.shape
-    return data
+    info = info.drop(['filename'],axis=1)
+    info = info.drop(['label'],axis=1)
+    info = info.drop(['chroma_stft'],axis=1)
+    info.shape
+
+    print("Preprocessing is finished")
+    print(info.head())
+    return info
 
 def getSpeaker(speaker):
     speaker = "Speaker"+str(speaker).zfill(3)
@@ -285,15 +332,9 @@ scaler = joblib.load('../scaler.save')
 def recognition():
     mail=request.get_json()['email']
     data=request.get_json()['data']
-    print(mail)
-    #s=cur.execute("SELECT user_id from users where email='"+mail+"'")
-    #id=s.fetchone()[0]
-    id=61
-    print(id)
+    s=cur.execute("SELECT user_id from users where email='"+mail+"'")
+    id=s.fetchone()[0]
     filename="Speaker"+str(id).zfill(4)+"_000.wav"
-    print(filename)
-    new_model = keras.models.load_model('../speaker-recognition.h5')
-    scaler = joblib.load('../scaler.save') 
     f = open('../new_audios/test_file/'+filename, 'wb')
     f.write(bytearray(data['data']))
     f.close()
@@ -340,7 +381,7 @@ def register():
     print(mail)
     shutil.rmtree('../new_audios/train2/')
     os.mkdir('../new_audios/train2/')
-    cur.execute("INSERT INTO users (email) VALUES ('"+mail+"')")
+    cur.execute("INSERT INTO users (email, rol) VALUES ('"+mail+"', 'admin')")
     con.commit()
     s=cur.execute("SELECT user_id from users where email='"+mail+"'")
     id=s.fetchone()[0]
@@ -353,27 +394,18 @@ def register():
     extractWavFeaturesmult("../new_audios/train2", NEW_USER)
     train_data = preProcessData(TRAIN_CSV_FILE)
     newData = preProcessData(NEW_USER)
-    dataFrame = pd.read_csv(NEW_USER)
+    #dataFrame = pd.read_csv(NEW_USER)
     #dataFrame.to_csv(TRAIN_CSV_FILE, mode='a', index=False, header=False)
     trainData=train_data.append(newData, ignore_index=True)
     # Splitting the dataset into training, validation and testing dataset
     X = np.array(trainData.iloc[:, :-1], dtype = float)
     y = trainData.iloc[:, -1]
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.3, random_state=50)
+    #utilizar antic scaler
     scaler = StandardScaler()
     X_train = scaler.fit_transform( X_train )
     X_val = scaler.transform( X_val )
-    # weight={}
-    # path='audios/audios/56_speakers_audio_data'
-    # max_value=sum(count.values())
-    # print(len(count))
-    # count.update({len(count):8})
-    # max_value=sum(count.values())
-    # print("Sum of values: "+str(max_value))
-    # weight = {key: value for key, value in sorted(weight.items())}
-    # weight = {k: 1-(v/max_value) for k, v in weight.items()}
-    # print(weight.keys())
-    # print(set(range(57)) - set(y_train))
+    count[id]=1-20/399
     model = models.Sequential()
     model.add(layers.Dense(256, activation='relu', input_shape=(X_train.shape[1],)))
     model.add(layers.Dropout(0.5))
@@ -385,15 +417,102 @@ def register():
     model.compile(optimizer='adam',
                 loss='sparse_categorical_crossentropy',
                 metrics=['accuracy'])
-    es = EarlyStopping(monitor='val_loss', patience=3, verbose=1)
+    es = EarlyStopping(monitor='val_accuracy', patience=10, verbose=1)
     y_train=np.array(y_train, dtype=int)
     print("hola2")
     y_val=np.array(y_val, dtype=int)
-    history = model.fit(X_train,y_train,validation_data=(X_val, y_val),epochs=100,batch_size=128, callbacks=[es])    
-    print("hola4")
+    history = model.fit(X_train,y_train,validation_data=(X_val, y_val),epochs=100,batch_size=128, class_weight=count, callbacks=[es])    
     joblib.dump(scaler, '../scaler.save')
     model.save('../speaker-recognition.h5')
     return {"Res":"OK"}
 
+############################################
+# Behavioral recognition
+############################################
+def predict(test):
+    b_model = keras.models.load_model('../behavior/behavior-recognition.h5')
+    b_scaler = joblib.load('../behavior/behavior_scaler.save') 
+    X_test = np.array(test.iloc[:, :-1], dtype = float)
+    y_test = test.iloc[:, -1]
+    X_test = b_scaler.transform( X_test )   
+    score = b_model.evaluate(X_test, y_test)
+    return score[1]
 
-app.run(debug=True, port=8000)
+@app.route('/behavior_recognition', methods=['POST'])
+def behavior_recognition():
+    obj=request.get_json()
+    array=np.array(obj)
+    test=pd.DataFrame([x for i, x in enumerate(array) if i!=0], columns=array[0].split(','))
+    test=test.drop(columns='time_secs')
+    return jsonify({"Res": predict(test)})
+
+
+###################################################
+# Face recognition
+###################################################
+@app.route('/face_recognition', methods=['POST'])
+def face():
+    mail=request.get_json()['email']
+    data=request.get_json()['data']
+    count=0
+    s=cur.execute("SELECT salt from users where email='"+mail+"'")
+    sa=s.fetchone()[0]
+    salt=bytes.fromhex(sa)
+    plaintext=mail.encode()
+    digest=hashlib.pbkdf2_hmac('sha256', plaintext, salt, 10000)
+    hex_hash=digest.hex()
+    f=open('users/'+str(hex_hash)+'.txt', 'rb')
+    info=pickle.load(f)
+    f.close()
+    for x in data:
+        new_data=x.replace('data:image/png;base64,', '')
+        d=np.frombuffer(base64.b64decode(new_data), dtype=np.uint8)
+        img=cv2.imdecode(d, flags=1)
+        face=detect_face2(img)
+        if type(face) != bool:
+            result = face_recognition.compare_faces(info, face)
+            for x in result:
+                if x==True:
+                    count=count+1
+    print("Percentatge: "+str(count)+" %")
+    if(count>360): 
+        val=True
+    else:
+        val=False
+    return jsonify({"Res": val})
+
+@app.route('/face_register', methods=['POST'])
+def face_register():
+    mail=request.get_json()['email']
+    salt=os.urandom(16)
+    plaintext=mail.encode()
+    digest=hashlib.pbkdf2_hmac('sha256', plaintext, salt, 10000)
+    hex_hash=digest.hex()
+    cur.execute("""INSERT INTO users (email,salt, rol) VALUES (?,?,?)""", (mail, salt.hex(), 'admin'))
+    con.commit()
+    data=request.get_json()['data']
+    info=[]
+    for x in data:
+        new_data=x.replace('data:image/png;base64,', '')
+        d=np.frombuffer(base64.b64decode(new_data), dtype=np.uint8)
+        img=cv2.imdecode(d, flags=1)
+        face=detect_face2(img)
+        if type(face) != bool:
+            info.append(face)
+    f=open('users/'+str(hex_hash)+'.txt', 'wb')
+    pickle.dump(info, f)
+    f.close()
+    with open('test.png', 'wb') as f:
+        f.write(img)
+    return {'Res': 'OK'}
+
+def detect_face2(image):
+    face_loc=face_recognition.face_locations(image)
+    if len(face_loc)==0:
+        return False
+    else:
+        face_loc=face_loc[0]
+    return face_recognition.face_encodings(image, known_face_locations=[face_loc])[0]
+
+
+app.run(debug=True, host='0.0.0.0', port=8000)

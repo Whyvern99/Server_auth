@@ -16,7 +16,6 @@ class Blockchain:
     def __init__(self):
         self.chain = []
         self.unconfirmed_transactions = []
-        self.create_genesis_block() 
     
     def create_genesis_block(self):
         genesis_block=block.Block(0, [], time.time(), "0")
@@ -37,15 +36,20 @@ class Blockchain:
     
     def add_block(self, block, proof):
         previous_block=self.last_block.hash
+        print(previous_block)
         if previous_block!=block.previous_block:
+            print("diff")
             return False
         if not self.is_valid_proof(block, proof):
+            print("not_valid")
             return False
         block.hash = proof
         self.chain.append(block)
         return True
     
     def is_valid_proof(self, block, block_hash):
+        print(block.__dict__)
+        print(block_hash == block.compute_hash())
         return (block_hash.startswith('0' * Blockchain.dif) and block_hash == block.compute_hash())
 
     def add_new_transaction(self, transaction):
@@ -92,7 +96,6 @@ class Blockchain:
                         return 'Error'
                     break
         cls.add_new_transaction(data)
-        cls.mine()
         return False
     
     def get_pk(cls, UUID, chain):
