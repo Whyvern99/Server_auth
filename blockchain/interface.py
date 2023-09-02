@@ -51,6 +51,7 @@ import os
 import pickle
 import hashlib
 import block
+import psycopg2
 
 app = Flask(__name__)
 CORS(app)
@@ -205,9 +206,11 @@ def concensus():
 
     return False
 
-con = sqlite3.connect('tfm.db', check_same_thread=False)
-cur = con.cursor()
+#con = sqlite3.connect('tfm.db', check_same_thread=False)
+#cur = con.cursor()
 
+con=psycopg2.connect(database="postgres", host='localhost', user='project', password='authorization' )
+cur = con.cursor()
 ############################################################
 #Emergency
 ############################################################
@@ -219,22 +222,32 @@ def emergencies():
     for field in require_fields:
         if not data.get(field):
             return "Invalid transaction data", 404
-    s=cur.execute("SELECT rol from users where email='"+data.get("user")+"'")
-    user_p=s.fetchone()[0]
-    s=cur.execute("SELECT permission from devices where device_id='"+str(data.get("device"))+"'")
-    device_p=s.fetchone()[0]
-    if(user_p=="admin"):
-        permission=device_p
-    elif(device_p=="admin"):
-        permission=user_p
+    cur.execute("""SELECT rol from users where email='%s'""" % data.get("user"))
+    user_p=cur.fetchone()[0]
+    cur.execute("""SELECT permission from devices where device_id='%s'""" % str(data.get("device")))
+    device_p=cur.fetchone()[0]
+    if(user_p=="admin" and device_p=="admin"):
+        cur.execute("SELECT * from emergency")
+        locations=cur.fetchall()
+        sentence="All emergencies"
     else:
-        if(user_p==device_p):
-             permission=user_p
+        if(user_p=="admin"):
+            permission=device_p
+        elif(device_p=="admin"):
+            permission=user_p
         else:
-            permission=""
-    locations=cur.execute("SELECT * from emergency where permission='"+permission+"'")
-    print(locations)
-    return jsonify(list(locations))
+            if(user_p==device_p):
+                permission=user_p
+            else:
+                permission=""
+        if(permission=='doctor'):
+            sentence="Medical emergencies"
+        elif(permission=='fireman'):
+            sentence="Firefighter emergencies"
+
+        cur.execute("SELECT * from emergency where permission='"+permission+"'")
+        locations=cur.fetchall()
+    return jsonify({'emergencies':list(locations),'rol':sentence})
 
 ############################################################
 #Voice recognition
@@ -450,32 +463,54 @@ def behavior_recognition():
 ###################################################
 # Face recognition
 ###################################################
+from skimage.metrics import structural_similarity as ssim
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import os
+
 @app.route('/face_recognition', methods=['POST'])
 def face():
     mail=request.get_json()['email']
     data=request.get_json()['data']
     count=0
-    s=cur.execute("SELECT salt from users where email='"+mail+"'")
-    sa=s.fetchone()[0]
-    salt=bytes.fromhex(sa)
-    plaintext=mail.encode()
-    digest=hashlib.pbkdf2_hmac('sha256', plaintext, salt, 10000)
-    hex_hash=digest.hex()
-    f=open('users/'+str(hex_hash)+'.txt', 'rb')
+    f=open('users/'+str(mail)+'.txt', 'rb')
     info=pickle.load(f)
     f.close()
+    i=0
     for x in data:
         new_data=x.replace('data:image/png;base64,', '')
         d=np.frombuffer(base64.b64decode(new_data), dtype=np.uint8)
         img=cv2.imdecode(d, flags=1)
         face=detect_face2(img)
+        if(i==0):
+            prev=img
+            i=+1
+        else:
+            print(i)
+            i+=1
+            original = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+            contrast = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # compare the images
+            m = np.sum((original.astype("float") - contrast.astype("float")) ** 2)
+            m /= float(original.shape[0] * original.shape[1])
+            s = ssim(original, contrast)
+            print("MSE: %.2f, SSIM: %.2f" % (m, s))
+            if(s==1):
+                return {'Res':'ERROR_NOMOV'}
+            elif(s<0.4):
+                return {'Res':'ERROR_MOV'}
+            prev=img
+        if type(face) == bool:
+            print('helooooooooooooooooooooooooooooooo')
+            return {'Res':'ERROR_NOFACELOC'}
         if type(face) != bool:
             result = face_recognition.compare_faces(info, face)
             for x in result:
                 if x==True:
                     count=count+1
     print("Percentatge: "+str(count)+" %")
-    if(count>360): 
+    if(count>380): 
         val=True
     else:
         val=False
@@ -483,27 +518,42 @@ def face():
 
 @app.route('/face_register', methods=['POST'])
 def face_register():
-    mail=request.get_json()['email']
-    salt=os.urandom(16)
-    plaintext=mail.encode()
-    digest=hashlib.pbkdf2_hmac('sha256', plaintext, salt, 10000)
-    hex_hash=digest.hex()
-    cur.execute("""INSERT INTO users (email,salt, rol) VALUES (?,?,?)""", (mail, salt.hex(), 'admin'))
-    con.commit()
     data=request.get_json()['data']
     info=[]
+    i=0
     for x in data:
         new_data=x.replace('data:image/png;base64,', '')
         d=np.frombuffer(base64.b64decode(new_data), dtype=np.uint8)
         img=cv2.imdecode(d, flags=1)
         face=detect_face2(img)
+        if(i==0):
+            prev=img
+            i=+1
+        else:
+            print(i)
+            i+=1
+            original = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+            contrast = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # compare the images
+            m = np.sum((original.astype("float") - contrast.astype("float")) ** 2)
+            m /= float(original.shape[0] * original.shape[1])
+            s = ssim(original, contrast)
+            print("MSE: %.2f, SSIM: %.2f" % (m, s))
+            if(s==1):
+                return {'Res':'ERROR_NOMOV'}
+            elif(s<0.4):
+                return {'Res':'ERROR_MOV'}
+            prev=img
         if type(face) != bool:
             info.append(face)
-    f=open('users/'+str(hex_hash)+'.txt', 'wb')
+        else:
+            return {'Res':'ERROR_NOFACELOC'}
+    mail=request.get_json()['email']
+    cur.execute("""INSERT INTO users (email, rol) VALUES (%s,%s)""", (mail, 'fireman'))
+    con.commit()
+    f=open('users/'+str(mail)+'.txt', 'wb')
     pickle.dump(info, f)
     f.close()
-    with open('test.png', 'wb') as f:
-        f.write(img)
     return {'Res': 'OK'}
 
 def detect_face2(image):
